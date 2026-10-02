@@ -12,6 +12,11 @@ dist
 dist-ssr
 *.local
 
+# Local environment files. The public production URL lives in .env.production.
+.env
+.env.*
+!.env.production
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

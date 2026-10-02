@@ -18,12 +18,17 @@ export function spokenText(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
+function apiBase(): string {
+  const configured = import.meta.env.VITE_API_URL?.trim().replace(/\/$/, "");
+  return configured ? `${configured}/api` : "/api";
+}
+
 export async function generateSpeech(
   text: string,
   voice: string,
   speed: number,
 ): Promise<Blob> {
-  const response = await fetch("/api/tts", {
+  const response = await fetch(`${apiBase()}/tts`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text, voice, speed }),
