@@ -10,6 +10,16 @@ import {
 } from "./lib/tts";
 
 const AUTOPLAY_KEY = "listenly-autoplay";
+const MAX_PDF_BYTES = 20 * 1024 * 1024;
+
+type InputMode = "text" | "pdf";
+
+type PdfSelection = {
+  name: string;
+  size: number;
+  pages: number;
+  text: string;
+};
 
 function readAutoplay(): boolean {
   try {
@@ -17,6 +27,17 @@ function readAutoplay(): boolean {
   } catch {
     return false;
   }
+}
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024 * 1024) {
+    const kilobytes = bytes / 1024;
+    const text = kilobytes >= 10 ? String(Math.round(kilobytes)) : kilobytes.toFixed(1);
+    return `${text} KB`;
+  }
+  const megabytes = bytes / (1024 * 1024);
+  const text = megabytes >= 10 ? String(Math.round(megabytes)) : megabytes.toFixed(1);
+  return `${text} MB`;
 }
 
 function formatTime(seconds: number): string {
@@ -28,7 +49,9 @@ function formatTime(seconds: number): string {
 }
 
 export default function App() {
+  const [mode, setMode] = useState<InputMode>("text");
   const [text, setText] = useState("");
+  const [pdf, setPdf] = useState<PdfSelection | null>(null);
   const [voice, setVoice] = useState<string>(VOICES[0].id);
   const [speed, setSpeed] = useState("1");
   const [generating, setGenerating] = useState(false);
@@ -43,7 +66,8 @@ export default function App() {
   const audioUrlRef = useRef<string | null>(null);
   const settingsRef = useRef<HTMLDivElement>(null);
 
-  const spoken = spokenText(text);
+  const activeText = mode === "text" ? text : (pdf?.text ?? "");
+  const spoken = spokenText(activeText);
   const tooLong = spoken.length > MAX_CHARS;
   const canGenerate = spoken.length > 0 && !tooLong && !generating && !extracting;
   const message =
@@ -75,21 +99,32 @@ export default function App() {
   async function loadPdf(file: File) {
     const isPdf = file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf");
     if (!isPdf) {
-      setError("Drop a PDF file, or paste your text.");
+      setError("Choose a PDF file.");
+      return;
+    }
+    if (file.size > MAX_PDF_BYTES) {
+      setError("PDF must be 20 MB or smaller.");
       return;
     }
     setExtracting(true);
     setError("");
     try {
       const extracted = await extractPdfText(await file.arrayBuffer());
-      if (!extracted) {
+      if (!extracted.text) {
+        setPdf(null);
         setError(
           "This PDF has no selectable text. Try a PDF with a text layer, or paste the text instead.",
         );
         return;
       }
-      setText(extracted);
+      setPdf({
+        name: file.name,
+        size: file.size,
+        pages: extracted.pageCount,
+        text: extracted.text,
+      });
     } catch {
+      setPdf(null);
       setError("Could not read that PDF. If it is password-protected, paste the text instead.");
     } finally {
       setExtracting(false);
@@ -130,7 +165,7 @@ export default function App() {
               <h1 className="text-[22px] leading-none font-bold tracking-tight text-[#1b1536]">
                 Listenly-ai
               </h1>
-              <p className="mt-1.5 text-[14px] text-[#9aa1b5]">Turn your text into audio</p>
+              <p className="mt-1.5 text-[14px] text-[#9aa1b5]">Turn your text or PDF into audio</p>
             </div>
           </div>
           <div className="relative" ref={settingsRef}>
@@ -168,71 +203,131 @@ export default function App() {
           </div>
         </header>
 
-        <div
-          className={`relative mt-6 rounded-2xl border bg-[#fcfcff] transition ${dragOver ? "border-[#6d5efc] bg-[#f7f5ff]" : "border-[#e7e9f2]"}`}
-          onDragOver={(event) => {
-            event.preventDefault();
-            setDragOver(true);
-          }}
-          onDragLeave={(event) => {
-            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
-              setDragOver(false);
-            }
-          }}
-          onDrop={(event) => {
-            event.preventDefault();
-            setDragOver(false);
-            const file = event.dataTransfer.files[0];
-            if (file && !generating) void loadPdf(file);
-          }}
-        >
-          <textarea
-            value={text}
-            onChange={(event) => {
-              setText(event.target.value);
-              if (error) setError("");
+        <div role="tablist" aria-label="Input type" className="mt-6 grid grid-cols-2 gap-1 rounded-2xl bg-[#f4f3f8] p-1">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === "text"}
+            onClick={() => {
+              setMode("text");
+              setError("");
             }}
-            onKeyDown={(event) => {
-              if ((event.metaKey || event.ctrlKey) && event.key === "Enter" && canGenerate) {
-                event.preventDefault();
-                void onGenerate();
-              }
+            className={`flex h-11 cursor-pointer items-center justify-center gap-2 rounded-xl text-[14px] font-semibold text-[#2c2848] ${mode === "text" ? "bg-[#f3f0ff] shadow-[inset_0_0_0_1px_#e4dcff]" : ""}`}
+          >
+            <TextDocIcon />
+            Text
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={mode === "pdf"}
+            onClick={() => {
+              setMode("pdf");
+              setError("");
             }}
-            placeholder="Paste your text here..."
-            disabled={generating}
-            className="block max-h-[200px] min-h-[124px] w-full resize-none overflow-y-auto bg-transparent px-4 pt-4 pb-2 text-[15px] leading-6 text-[#2c2848] outline-none placeholder:text-[#c5c9d6] disabled:opacity-70"
-          />
-          <div className="flex items-center justify-between gap-3 px-4 pt-1 pb-3">
-            <button
-              type="button"
-              onClick={() => fileRef.current?.click()}
-              disabled={generating || extracting}
-              title="Upload a PDF or drop it on the text box"
-              className="cursor-pointer text-[13px] font-medium text-[#7a6af3] disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {extracting ? "Reading PDF..." : "Upload PDF"}
-            </button>
-            <span className={`text-[12px] ${tooLong ? "text-rose-500" : "text-[#c0c4d2]"}`}>
-              {countLabel}
-            </span>
-          </div>
-          {dragOver && (
-            <div className="pointer-events-none absolute inset-0 flex items-center justify-center rounded-2xl bg-[#f4f1ff]/90 text-sm font-medium text-[#6d5efc]">
-              Drop PDF to extract text
-            </div>
-          )}
-          <input
-            ref={fileRef}
-            type="file"
-            accept="application/pdf,.pdf"
-            className="hidden"
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              event.target.value = "";
-              if (file) void loadPdf(file);
-            }}
-          />
+            className={`flex h-11 cursor-pointer items-center justify-center gap-2 rounded-xl text-[14px] font-semibold text-[#2c2848] ${mode === "pdf" ? "bg-[#f3f0ff] shadow-[inset_0_0_0_1px_#e4dcff]" : ""}`}
+          >
+            <PdfDocIcon />
+            PDF
+          </button>
         </div>
+
+        {mode === "text" ? (
+          <div className="mt-4 rounded-2xl border border-[#e7e9f2] bg-[#fcfcff]">
+            <textarea
+              value={text}
+              onChange={(event) => {
+                setText(event.target.value);
+                if (error) setError("");
+              }}
+              onKeyDown={(event) => {
+                if ((event.metaKey || event.ctrlKey) && event.key === "Enter" && canGenerate) {
+                  event.preventDefault();
+                  void onGenerate();
+                }
+              }}
+              placeholder="Paste your text here..."
+              disabled={generating}
+              className="block max-h-[200px] min-h-[124px] w-full resize-none overflow-y-auto bg-transparent px-4 pt-4 pb-2 text-[15px] leading-6 text-[#2c2848] outline-none placeholder:text-[#c5c9d6] disabled:opacity-70"
+            />
+            <div className="px-4 pt-1 pb-3 text-right">
+              <span className={`text-[12px] ${tooLong ? "text-rose-500" : "text-[#c0c4d2]"}`}>
+                {countLabel}
+              </span>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-4">
+            <div
+              className={`flex min-h-[210px] flex-col items-center justify-center rounded-2xl border border-dashed px-6 py-8 text-center transition ${dragOver ? "border-[#6d5efc] bg-[#f7f5ff]" : "border-[#ddd6fe] bg-[#fbfaff]"}`}
+              onDragOver={(event) => {
+                event.preventDefault();
+                setDragOver(true);
+              }}
+              onDragLeave={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+                  setDragOver(false);
+                }
+              }}
+              onDrop={(event) => {
+                event.preventDefault();
+                setDragOver(false);
+                const file = event.dataTransfer.files[0];
+                if (file && !generating && !extracting) void loadPdf(file);
+              }}
+            >
+              <PdfDropIcon />
+              <p className="mt-3 text-[15px] font-semibold text-[#1b1536]">
+                {extracting ? "Reading PDF..." : "Drop your PDF here"}
+              </p>
+              <p className="mt-1 text-[13px] text-[#b0b4c4]">or</p>
+              <button
+                type="button"
+                onClick={() => fileRef.current?.click()}
+                disabled={generating || extracting}
+                className="mt-3 inline-flex cursor-pointer items-center gap-2 rounded-xl border border-[#e6e4f2] bg-white px-4 py-2 text-[14px] font-semibold text-[#2c2848] shadow-[0_1px_2px_rgba(40,30,80,0.04)] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <UploadArrowIcon />
+                Choose PDF
+              </button>
+              <p className="mt-3 text-[12px] text-[#b7bccb]">PDF up to 20 MB</p>
+            </div>
+            {pdf && (
+              <div className="mt-3 flex items-center gap-3 rounded-xl border border-[#eceef5] bg-white px-3 py-2.5">
+                <PdfDocIcon />
+                <div className="min-w-0 flex-1 text-left">
+                  <p className="truncate text-[14px] font-medium text-[#1b1536]">{pdf.name}</p>
+                  <p className="text-[12px] text-[#9aa1b5]">
+                    {pdf.pages} {pdf.pages === 1 ? "page" : "pages"} • {formatFileSize(pdf.size)}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  aria-label="Remove PDF"
+                  onClick={() => {
+                    setPdf(null);
+                    setError("");
+                  }}
+                  disabled={generating}
+                  className="cursor-pointer rounded-full p-1 text-[#b0b6c6] hover:text-[#6b7280] disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <CloseIcon />
+                </button>
+              </div>
+            )}
+            <input
+              ref={fileRef}
+              type="file"
+              accept="application/pdf,.pdf"
+              className="hidden"
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                event.target.value = "";
+                if (file) void loadPdf(file);
+              }}
+            />
+          </div>
+        )}
 
         <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-2">
           <FieldSelect
@@ -281,7 +376,11 @@ export default function App() {
 
         {audioUrl && (
           <>
-            <div className="mt-5 h-px bg-[#eceef3]" />
+            <div className="mt-5 flex items-center gap-3">
+              <div className="h-px flex-1 bg-[#eceef3]" />
+              <span className="text-[11px] font-medium tracking-[0.14em] text-[#c5c8d4]">OR</span>
+              <div className="h-px flex-1 bg-[#eceef3]" />
+            </div>
             <ReadyPanel key={audioUrl} src={audioUrl} autoPlay={playOnReady} />
           </>
         )}
@@ -433,6 +532,73 @@ function ReadyPanel({ src, autoPlay }: { src: string; autoPlay: boolean }) {
         onEnded={() => setPlaying(false)}
       />
     </section>
+  );
+}
+
+function TextDocIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true" className="text-[#7c6bf5]">
+      <path
+        d="M7 3.5h7l4 4V20a1.5 1.5 0 0 1-1.5 1.5h-9.5A1.5 1.5 0 0 1 5.5 20V5A1.5 1.5 0 0 1 7 3.5Z"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+      />
+      <path d="M14 3.8V8h4.2" stroke="currentColor" strokeWidth="1.7" strokeLinejoin="round" />
+      <path d="M8.5 12.5h7M8.5 16h5" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function PdfDocIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path
+        d="M7 3.5h7l4 4V20a1.5 1.5 0 0 1-1.5 1.5h-9.5A1.5 1.5 0 0 1 5.5 20V5A1.5 1.5 0 0 1 7 3.5Z"
+        stroke="#f04444"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+      />
+      <path d="M14 3.8V8h4.2" stroke="#f04444" strokeWidth="1.7" strokeLinejoin="round" />
+      <path d="M8.2 16.2h2.1a1.5 1.5 0 0 0 0-3H8.2v4.6" stroke="#f04444" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M12.4 13.2h1.6M12.4 15.1h1.4" stroke="#f04444" strokeWidth="1.3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function PdfDropIcon() {
+  return (
+    <svg width="42" height="46" viewBox="0 0 42 46" fill="none" aria-hidden="true">
+      <path
+        d="M10 4h14l10 10v24a4 4 0 0 1-4 4H10a4 4 0 0 1-4-4V8a4 4 0 0 1 4-4Z"
+        fill="#f4f2fb"
+        stroke="#d9d4ea"
+        strokeWidth="1.6"
+      />
+      <path d="M24 4v10h10" stroke="#d9d4ea" strokeWidth="1.6" />
+      <rect x="11" y="28" width="20" height="10" rx="2" fill="#f04444" />
+      <text x="21" y="35.5" textAnchor="middle" fill="white" fontSize="6.5" fontFamily="sans-serif" fontWeight="700">
+        PDF
+      </text>
+    </svg>
+  );
+}
+
+function UploadArrowIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true" className="text-[#7c6bf5]">
+      <path d="M12 16V6" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+      <path d="M8.2 9.2 12 5.4l3.8 3.8" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M6 18.5h12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function CloseIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M7 7l10 10M17 7 7 17" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+    </svg>
   );
 }
 

@@ -3,7 +3,12 @@ import workerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
 GlobalWorkerOptions.workerSrc = workerUrl;
 
-export async function extractPdfText(data: ArrayBuffer): Promise<string> {
+export type PdfExtract = {
+  text: string;
+  pageCount: number;
+};
+
+export async function extractPdfText(data: ArrayBuffer): Promise<PdfExtract> {
   const loadingTask = getDocument({ data: new Uint8Array(data) });
   const pdf = await loadingTask.promise;
   const pages: string[] = [];
@@ -21,9 +26,8 @@ export async function extractPdfText(data: ArrayBuffer): Promise<string> {
       const line = words.join(" ").replace(/\s+/g, " ").trim();
       if (line) pages.push(line);
     }
+    return { text: pages.join("\n\n").trim(), pageCount: pdf.numPages };
   } finally {
     await loadingTask.destroy();
   }
-
-  return pages.join("\n\n").trim();
 }

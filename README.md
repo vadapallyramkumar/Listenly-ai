@@ -18,6 +18,6 @@ npm run dev
 
 Open http://localhost:5173.
 
-Paste text or drop a PDF on the text box, choose a voice and speed, then generate. Playback and **Download MP3** appear when the file is ready. The gear turns on autoplay for the next generation.
+Use the Text tab to paste text, or the PDF tab to drop a file up to 20 MB. Choose a voice and speed, then generate. Playback and **Download MP3** appear when the file is ready. The gear turns on autoplay for the next generation.
 
 Text longer than about 2,500 characters is spoken in parts and joined into one MP3. The limit is 40,000 characters. Scanned PDFs with no text layer cannot be read.
